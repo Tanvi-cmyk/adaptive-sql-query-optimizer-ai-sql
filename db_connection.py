@@ -19,10 +19,7 @@ def get_connection():
             database=config["database"],
             port=int(config["port"]),
             autocommit=True,
-
-            # ✅ Railway SSL fix
-            ssl_disabled=False,
-
+            ssl_disabled=False,   # ✅ Railway SSL
             connection_timeout=10
         )
 
@@ -30,7 +27,20 @@ def get_connection():
             cursor = connection.cursor()
 
             # =====================================
-            # ✅ CREATE TABLES (WITH user_id)
+            # 👤 USERS TABLE (NEW)
+            # =====================================
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(100),
+                email VARCHAR(100) UNIQUE,
+                password VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+
+            # =====================================
+            # 📊 QUERY LOGS
             # =====================================
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS query_logs (
@@ -43,6 +53,9 @@ def get_connection():
             )
             """)
 
+            # =====================================
+            # ⚙ OPTIMIZATION RESULTS
+            # =====================================
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS optimization_results (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -56,17 +69,17 @@ def get_connection():
             """)
 
             # =====================================
-            # ✅ SAFE COLUMN ADD (if already old table)
+            # 🛠 SAFE COLUMN ADD (BACKWARD COMPATIBLE)
             # =====================================
             try:
                 cursor.execute("ALTER TABLE query_logs ADD COLUMN user_id VARCHAR(255)")
             except:
-                pass  # already exists
+                pass
 
             try:
                 cursor.execute("ALTER TABLE optimization_results ADD COLUMN user_id VARCHAR(255)")
             except:
-                pass  # already exists
+                pass
 
             cursor.close()
 

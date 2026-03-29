@@ -1,5 +1,6 @@
 import streamlit as st
 import uuid
+import hashlib
 
 from optimizer import (
     predict_time,
@@ -13,16 +14,80 @@ from db_connection import get_connection
 
 
 # =============================================
-# 🔐 UNIQUE USER SESSION (IMPORTANT)
+# 🔐 CONFIG
 # =============================================
-if "user_id" not in st.session_state:
-    st.session_state.user_id = str(uuid.uuid4())
+st.set_page_config(page_title="QueryPilot AI", page_icon="🚀", layout="wide")
 
-user_id = st.session_state.user_id
+st.title("🚀 QueryPilot AI")
+st.caption("Optimize SQL queries using AI + Cloud Intelligence")
+
+
+# =============================================
+# 🔐 AUTH SYSTEM
+# =============================================
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+auth_mode = st.sidebar.radio("Account", ["Login", "Signup", "Guest"])
+
+user = st.session_state.get("user", None)
+
+if auth_mode == "Signup":
+    st.sidebar.subheader("Create Account")
+    username = st.sidebar.text_input("Username")
+    email = st.sidebar.text_input("Email")
+    password = st.sidebar.text_input("Password", type="password")
+
+    if st.sidebar.button("Register"):
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO users (username, email, password)
+            VALUES (%s, %s, %s)
+        """, (username, email, hash_password(password)))
+
+        conn.commit()
+        st.sidebar.success("✅ Account created! Login now")
+
+
+elif auth_mode == "Login":
+    st.sidebar.subheader("Login")
+    email = st.sidebar.text_input("Email")
+    password = st.sidebar.text_input("Password", type="password")
+
+    if st.sidebar.button("Login"):
+        conn = get_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT * FROM users 
+            WHERE email=%s AND password=%s
+        """, (email, hash_password(password)))
+
+        user = cursor.fetchone()
+
+        if user:
+            st.session_state.user = user
+            st.sidebar.success("✅ Logged in")
+        else:
+            st.sidebar.error("❌ Invalid credentials")
+
+
+# =============================================
+# USER IDENTIFICATION
+# =============================================
+if user:
+    user_id = user["id"]
+else:
+    if "guest_id" not in st.session_state:
+        st.session_state.guest_id = str(uuid.uuid4())
+    user_id = st.session_state.guest_id
 
 
 # ---------------------------------
-# Sidebar Navigation
+# Navigation
 # ---------------------------------
 menu = st.sidebar.selectbox(
     "Navigation",
@@ -31,130 +96,74 @@ menu = st.sidebar.selectbox(
 
 
 # =============================================
-# SQL OPTIMIZER SECTION
+# SQL OPTIMIZER
 # =============================================
 if menu == "SQL Optimizer":
 
-    st.title("🚀 Intelligent SQL Performance Optimizer")
-
     query = st.text_area("Enter SQL Query:")
+
+    # 🔥 AUTO SUGGESTIONS
+    keywords = ["SELECT", "FROM", "WHERE", "JOIN", "GROUP BY", "ORDER BY", "INSERT", "UPDATE", "DELETE"]
+    suggestions = [k for k in keywords if query.upper() in k]
+
+    if suggestions:
+        st.write("💡 Suggestions:", suggestions)
+
+    # 📂 FILE UPLOAD
+    uploaded_file = st.file_uploader("Upload .sql file", type=["sql"])
+
+    if uploaded_file:
+        content = uploaded_file.read().decode("utf-8")
+        st.code(content)
+
+        queries = content.split(";")
+
+        for q in queries:
+            if q.strip():
+                st.write("🔍 Analyzing:", q)
+                st.write("⏱", predict_time(q))
 
     if st.button("Execute / Analyze"):
 
         if query:
 
             conn = get_connection()
-
             if not conn:
-                st.error("❌ Database connection failed")
                 st.stop()
 
             cursor = conn.cursor(dictionary=True)
 
-            issues = []
-            index_rec = []
-            rewritten = ""
-
             try:
-                query_clean = query.strip().lower()
-
-                # Query Type Detection
-                if query_clean.startswith("select"):
-                    query_type = "SELECT"
-                elif query_clean.startswith("insert"):
-                    query_type = "INSERT"
-                elif query_clean.startswith("update"):
-                    query_type = "UPDATE"
-                elif query_clean.startswith("delete"):
-                    query_type = "DELETE"
-                elif query_clean.startswith("create"):
-                    query_type = "CREATE"
-                elif query_clean.startswith("alter"):
-                    query_type = "ALTER"
-                elif query_clean.startswith("drop"):
-                    query_type = "DROP"
-                else:
-                    query_type = "OTHER"
-
-                st.info(f"🔎 Detected Query Type: {query_type}")
-
-                if "drop database" in query_clean:
-                    st.error("❌ DROP DATABASE is not allowed.")
-                    st.stop()
-
-                # Execute Query
                 cursor.execute(query)
 
-                if query_type == "SELECT":
-                    result = cursor.fetchall()
-                    st.subheader("📋 Query Result")
-                    st.dataframe(result)
-
-                    explain_plan = get_explain_plan(query)
-                    st.subheader("📊 MySQL EXPLAIN Plan")
-                    st.dataframe(explain_plan)
-
-                    issues = analyze_plan(explain_plan)
-
-                    if issues:
-                        st.subheader("⚠️ Issues Detected")
-                        for issue in issues:
-                            st.write("-", issue)
-
+                if query.lower().startswith("select"):
+                    st.dataframe(cursor.fetchall())
                 else:
                     conn.commit()
-                    st.success("✅ Query executed successfully")
+                    st.success("✅ Query executed")
 
-                # AI Features
+                # AI
                 predicted_time = predict_time(query)
-                st.write(f"⏱ Predicted Execution Time: {predicted_time} sec")
+                st.write(f"⏱ Predicted Time: {predicted_time}")
 
-                basic_suggestions = suggest_basic_optimization(query)
-                if basic_suggestions:
-                    st.subheader("🔧 Optimization Suggestions")
-                    for s in basic_suggestions:
-                        st.write("-", s)
-
-                index_rec = recommend_index(query)
-                if index_rec:
-                    st.subheader("📌 Index Recommendations")
-                    for rec in index_rec:
-                        st.write("-", rec)
+                suggestions = suggest_basic_optimization(query)
+                for s in suggestions:
+                    st.write("-", s)
 
                 rewritten = rewrite_query(query)
-                st.subheader("🧠 Rewritten Optimized Query")
-                st.code(rewritten, language='sql')
+                st.code(rewritten, language="sql")
 
-                # RL Update
-                state = str(query)
-                action_index = choose_action(state)
-                update_q(state, action_index, reward=1)
+                # SAVE ONLY IF LOGGED IN
+                if user:
+                    cursor.execute("""
+                        INSERT INTO query_logs (query_text, predicted_time, user_id)
+                        VALUES (%s, %s, %s)
+                    """, (query, predicted_time, user_id))
 
-                # =============================================
-                # 💾 STORE USER-SPECIFIC DATA
-                # =============================================
-                cursor.execute("""
-                    INSERT INTO query_logs (query_text, predicted_time, user_id)
-                    VALUES (%s, %s, %s)
-                """, (query, predicted_time, user_id))
-
-                cursor.execute("""
-                    INSERT INTO optimization_results 
-                    (original_query, optimized_query, index_suggestions, issues_detected, user_id)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (
-                    query,
-                    rewritten,
-                    str(index_rec),
-                    str(issues),
-                    user_id
-                ))
-
-                conn.commit()
-                st.success("📦 Stored in your personal history!")
+                    conn.commit()
 
             except Exception as e:
-                st.error(f"❌ SQL Error: {e}")
+                st.error(e)
 
             finally:
                 cursor.close()
@@ -166,41 +175,20 @@ if menu == "SQL Optimizer":
 # =============================================
 elif menu == "Query History Dashboard":
 
-    st.title("📊 Your Query History")
-
-    conn = get_connection()
-
-    if not conn:
-        st.error("❌ Database connection failed")
+    if not user:
+        st.warning("⚠️ Login to view your history")
         st.stop()
 
-    try:
-        cursor = conn.cursor(dictionary=True)
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
 
-        # ✅ ONLY USER DATA
-        cursor.execute("""
-            SELECT * FROM query_logs 
-            WHERE user_id = %s
-            ORDER BY created_at DESC
-        """, (user_id,))
-        logs = cursor.fetchall()
+    cursor.execute("""
+        SELECT * FROM query_logs 
+        WHERE user_id = %s
+        ORDER BY created_at DESC
+    """, (user_id,))
 
-        st.subheader("📝 Your Queries")
-        st.dataframe(logs)
+    st.dataframe(cursor.fetchall())
 
-        cursor.execute("""
-            SELECT * FROM optimization_results 
-            WHERE user_id = %s
-            ORDER BY created_at DESC
-        """, (user_id,))
-        results = cursor.fetchall()
-
-        st.subheader("⚙ Your Optimization History")
-        st.dataframe(results)
-
-    except Exception as e:
-        st.error(f"Error loading dashboard: {e}")
-
-    finally:
-        cursor.close()
-        conn.close()
+    cursor.close()
+    conn.close()
