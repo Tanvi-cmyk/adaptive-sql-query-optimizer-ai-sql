@@ -1,6 +1,8 @@
+
 import streamlit as st
 import pandas as pd
 from db_connection import get_connection
+from optimizer import predict_time, suggest_basic_optimization, recommend_index, rewrite_query
 
 st.set_page_config(page_title="QueryPilot AI", layout="wide")
 
@@ -14,9 +16,10 @@ if "query" not in st.session_state:
 # ---------------- TITLE ----------------
 st.title("🚀 Intelligent SQL Performance Optimizer")
 
-menu = st.sidebar.radio("Navigation", ["SQL Editor", "History", "Profile"])
+menu = st.sidebar.radio("Navigation", ["Query Workspace", "History", "Profile"])
 auth = st.sidebar.radio("Account", ["Guest", "Login", "Signup"])
 
+# ---------------- DB CONNECTION ----------------
 conn = get_connection()
 if not conn:
     st.stop()
@@ -27,7 +30,7 @@ cursor = conn.cursor(dictionary=True)
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    email VARCHAR(100),
+    email VARCHAR(100) UNIQUE,
     password VARCHAR(100)
 )
 """)
@@ -72,7 +75,7 @@ if st.session_state.user:
 else:
     user_id = "guest"
 
-# ---------------- 🔥 USER TABLE PREFIX ----------------
+# ---------------- USER TABLE PREFIX ----------------
 def modify_query(query, user_id):
     if user_id == "guest":
         return query
@@ -91,18 +94,18 @@ def modify_query(query, user_id):
 # ============================
 # SQL EDITOR
 # ============================
-if menu == "SQL Editor":
+if menu == "Query Workspace":
 
-    st.subheader("💻 SQL Editor")
+    st.subheader(" Query Workspac")
 
-    query = st.text_area("Enter SQL Query:", st.session_state.query)
+    query = st.text_area("Enter SQL Query:", st.session_state.query, height=150)
     st.session_state.query = query
 
-    # 🔥 IMPROVED AUTOCOMPLETE
+    # ---------------- AUTO SUGGEST ----------------
     keywords = [
-        "SELECT", "FROM", "WHERE", "JOIN", "GROUP BY",
-        "ORDER BY", "INSERT INTO", "UPDATE", "DELETE",
-        "CREATE TABLE"
+        "SELECT", "FROM", "WHERE", "JOIN",
+        "GROUP BY", "ORDER BY", "INSERT INTO",
+        "UPDATE", "DELETE", "CREATE TABLE"
     ]
 
     if query:
@@ -112,7 +115,7 @@ if menu == "SQL Editor":
         suggestions = [k for k in keywords if k.startswith(last_word)]
 
         if suggestions:
-            st.write("💡 Suggestions:")
+            st.markdown("### 💡 Suggestions")
             cols = st.columns(len(suggestions))
 
             for i, s in enumerate(suggestions):
@@ -126,7 +129,7 @@ if menu == "SQL Editor":
                         st.session_state.query = new_query
                         st.rerun()
 
-    # 🔥 RUN QUERY
+    # ---------------- EXECUTE ----------------
     if st.button("Execute / Analyze"):
 
         try:
@@ -134,26 +137,69 @@ if menu == "SQL Editor":
 
             cursor.execute(final_query)
 
+            # RESULT
             if query.lower().startswith("select"):
                 result = cursor.fetchall()
                 df = pd.DataFrame(result)
+
+                st.subheader("📋 Query Result")
                 st.dataframe(df)
+
             else:
                 conn.commit()
                 st.success("Query executed")
 
-            # 🔥 SAVE HISTORY
+            # ---------------- EXPLAIN ----------------
+            if query.lower().startswith("select"):
+                cursor.execute("EXPLAIN " + final_query)
+                explain = cursor.fetchall()
+
+                st.subheader("📊 MySQL EXPLAIN Plan")
+                st.dataframe(pd.DataFrame(explain))
+
+            # ---------------- ISSUES ----------------
+            st.subheader("⚠ Issues Detected")
+
+            issues = []
+            if "select *" in query.lower():
+                issues.append("Full table scan detected.")
+            if "where" not in query.lower():
+                issues.append("No WHERE clause used.")
+
+            for i in issues:
+                st.write("⚠", i)
+
+            # ---------------- PREDICTION ----------------
+            predicted_time = predict_time(query)
+            st.write(f"⏱ Predicted Execution Time: {predicted_time} sec")
+
+            # ---------------- SUGGESTIONS ----------------
+            st.subheader("🔧 Optimization Suggestions")
+
+            suggestions = suggest_basic_optimization(query)
+            for s in suggestions:
+                st.write("•", s)
+
+            # ---------------- REWRITE ----------------
+            st.subheader("🧠 Rewritten Optimized Query")
+
+            optimized_query = rewrite_query(query)
+            st.code(optimized_query, language="sql")
+
+            # ---------------- SAVE ----------------
             if user_id != "guest":
                 cursor.execute("""
                     INSERT INTO query_logs (query_text, predicted_time, user_id)
                     VALUES (%s, %s, %s)
-                """, (query, 0.0, user_id))
+                """, (query, predicted_time, user_id))
                 conn.commit()
+
+                st.success("📦 Stored in database")
 
         except Exception as e:
             st.error(e)
 
-    # 🔥 FILE UPLOAD
+    # ---------------- FILE UPLOAD ----------------
     st.markdown("---")
     file = st.file_uploader("Upload .sql file", type=["sql"])
 
@@ -192,7 +238,7 @@ elif menu == "History":
         st.warning("Login to view history")
     else:
         cursor.execute("""
-            SELECT query_text FROM query_logs
+            SELECT query_text, created_at FROM query_logs
             WHERE user_id = %s
             ORDER BY created_at DESC
         """, (user_id,))
@@ -218,3 +264,4 @@ elif menu == "Profile":
     if st.button("Logout"):
         st.session_state.user = None
         st.rerun()
+
