@@ -1,42 +1,37 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 import uuid
+from db_connection import get_connection
 
 st.set_page_config(page_title="QueryPilot AI", layout="wide")
-
-# ---------------- DATABASE ----------------
-conn = sqlite3.connect("app.db", check_same_thread=False)
-cursor = conn.cursor()
-
-# USERS TABLE
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE,
-    password TEXT
-)
-""")
 
 # ---------------- SESSION ----------------
 if "user" not in st.session_state:
     st.session_state.user = None
 
-if "history" not in st.session_state:
-    st.session_state.history = []
-
 if "query" not in st.session_state:
     st.session_state.query = ""
 
-# ---------------- NAVBAR ----------------
+# ---------------- TITLE ----------------
 st.title("🚀 QueryPilot AI")
 
-menu = st.sidebar.radio(
-    "Menu",
-    ["SQL Editor", "History", "Profile"]
-)
-
+menu = st.sidebar.radio("Menu", ["SQL Editor", "History", "Profile"])
 auth = st.sidebar.radio("Account", ["Guest", "Login", "Signup"])
+
+conn = get_connection()
+if not conn:
+    st.stop()
+
+cursor = conn.cursor(dictionary=True)
+
+# ---------------- CREATE USERS TABLE ----------------
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(100),
+    password VARCHAR(100)
+)
+""")
 
 # ---------------- SIGNUP ----------------
 if auth == "Signup":
@@ -45,9 +40,9 @@ if auth == "Signup":
 
     if st.sidebar.button("Register"):
         try:
-            cursor.execute("INSERT INTO users (email, password) VALUES (?, ?)", (email, password))
+            cursor.execute("INSERT INTO users (email, password) VALUES (%s, %s)", (email, password))
             conn.commit()
-            st.sidebar.success("Account created! Login now")
+            st.sidebar.success("Account created!")
         except:
             st.sidebar.error("User already exists")
 
@@ -57,7 +52,7 @@ elif auth == "Login":
     password = st.sidebar.text_input("Password", type="password")
 
     if st.sidebar.button("Login"):
-        cursor.execute("SELECT * FROM users WHERE email=? AND password=?", (email, password))
+        cursor.execute("SELECT * FROM users WHERE email=%s AND password=%s", (email, password))
         user = cursor.fetchone()
 
         if user:
@@ -66,13 +61,11 @@ elif auth == "Login":
         else:
             st.sidebar.error("Invalid credentials")
 
-# ---------------- USER ID ----------------
+# ---------------- USER ----------------
 if st.session_state.user:
-    user_id = st.session_state.user[0]
+    user_id = st.session_state.user["id"]
 else:
-    if "guest_id" not in st.session_state:
-        st.session_state.guest_id = str(uuid.uuid4())
-    user_id = None  # guest → no save
+    user_id = None
 
 # ============================
 # SQL EDITOR
@@ -85,11 +78,7 @@ if menu == "SQL Editor":
     st.session_state.query = query
 
     # 🔥 AUTOCOMPLETE
-    keywords = [
-        "SELECT", "FROM", "WHERE", "JOIN",
-        "GROUP BY", "ORDER BY", "INSERT INTO",
-        "UPDATE", "DELETE"
-    ]
+    keywords = ["SELECT", "FROM", "WHERE", "JOIN", "GROUP BY", "ORDER BY", "INSERT", "UPDATE", "DELETE"]
 
     if query:
         last_word = query.split()[-1].upper()
@@ -109,20 +98,22 @@ if menu == "SQL Editor":
     if st.button("Execute"):
 
         try:
-            df = pd.read_sql_query(query, conn)
-            st.dataframe(df)
-            st.success("Query executed")
+            cursor.execute(query)
+
+            if query.lower().startswith("select"):
+                result = cursor.fetchall()
+                df = pd.DataFrame(result)
+                st.dataframe(df)
+            else:
+                conn.commit()
+                st.success("Query executed")
 
             # SAVE ONLY IF LOGGED IN
             if user_id:
                 cursor.execute("""
-                CREATE TABLE IF NOT EXISTS history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    query TEXT,
-                    user_id INTEGER
-                )
-                """)
-                cursor.execute("INSERT INTO history (query, user_id) VALUES (?, ?)", (query, user_id))
+                    INSERT INTO query_logs (query_text, predicted_time, user_id)
+                    VALUES (%s, %s, %s)
+                """, (query, 0.0, user_id))
                 conn.commit()
 
         except Exception as e:
@@ -141,7 +132,7 @@ if menu == "SQL Editor":
         for q in queries:
             if q.strip():
                 st.code(q)
-                st.write("💡 Suggestion: Avoid SELECT * if used")
+                st.write("💡 Suggestion: Avoid SELECT *")
 
 # ============================
 # HISTORY
@@ -150,14 +141,19 @@ elif menu == "History":
 
     st.subheader("📊 Query History")
 
-    if not st.session_state.user:
+    if not user_id:
         st.warning("Login to view history")
     else:
-        cursor.execute("SELECT query FROM history WHERE user_id=?", (user_id,))
-        data = cursor.fetchall()
+        cursor.execute("""
+            SELECT query_text FROM query_logs
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+        """, (user_id,))
 
-        for row in data[::-1]:
-            st.code(row[0])
+        rows = cursor.fetchall()
+
+        for row in rows:
+            st.code(row["query_text"])
 
 # ============================
 # PROFILE
@@ -167,7 +163,7 @@ elif menu == "Profile":
     st.subheader("👤 Profile")
 
     if st.session_state.user:
-        st.write("Email:", st.session_state.user[1])
+        st.write("Email:", st.session_state.user["email"])
     else:
         st.write("Guest User")
 
