@@ -1,23 +1,35 @@
 import mysql.connector
 from mysql.connector import Error
+import streamlit as st
 
 
 def get_connection():
     try:
-        connection = mysql.connector.connect(
-            host="localhost",
-            user="root",
-            password="Tanvi@721",
-            database="sql_optimizer",
-            port=3306,
-            autocommit=True
+        # ✅ Ensure secrets exist
+        if "mysql" not in st.secrets:
+            st.error("❌ MySQL secrets not found. Please configure secrets.toml")
+            return None
+
+        config = st.secrets["mysql"]
+
+        # ✅ Debug (remove later)
+        st.write("🔍 Connecting to:", config["host"], ":", config["port"])
+
+        conn = mysql.connector.connect(
+            host=config["host"],
+            user=config["user"],
+            password=config["password"],
+            database=config["database"],
+            port=int(config["port"]),
+            autocommit=True,
+            ssl_disabled=True,
+            connection_timeout=10
         )
 
-        if connection.is_connected():
-            print("✅ MySQL Connected Successfully")
+        if conn.is_connected():
+            st.success("✅ Connected to Railway MySQL")
 
-            # Create required tables if not exist
-            cursor = connection.cursor()
+            cursor = conn.cursor()
 
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS query_logs (
@@ -42,8 +54,16 @@ def get_connection():
 
             cursor.close()
 
-        return connection
+        return conn
+
+    except KeyError as e:
+        st.error(f"❌ Missing key in secrets: {e}")
+        return None
 
     except Error as e:
-        print("❌ Connection Error:", e)
-        raise
+        st.error(f"❌ MySQL Error: {e}")
+        return None
+
+    except Exception as e:
+        st.error(f"❌ Unexpected Error: {e}")
+        return None   # ✅ FIXED (you had typo here)
