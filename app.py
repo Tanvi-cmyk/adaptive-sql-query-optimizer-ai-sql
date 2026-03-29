@@ -1,163 +1,104 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import uuid
 
-st.set_page_config(page_title="QueryPilot AI", layout="wide")
+st.set_page_config(page_title="SQL Optimizer", layout="wide")
 
-# ---------------- CUSTOM CSS ----------------
-st.markdown("""
-<style>
-.stApp {
-    background: linear-gradient(135deg, #0e1117, #1c1f26);
-    color: white;
-}
-textarea {
-    background-color: #1c1f26 !important;
-    color: white !important;
-}
-div.stButton > button {
-    background-color: #4CAF50;
-    color: white;
-    border-radius: 8px;
-}
-.suggestion-box {
-    background: #1c1f26;
-    padding: 10px;
-    border-radius: 10px;
-    margin-top: 5px;
-}
-</style>
-""", unsafe_allow_html=True)
+# ---------------- SIMPLE UI ----------------
+st.title("🚀 Intelligent SQL Performance Optimizer")
 
 # ---------------- SESSION ----------------
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "user_email" not in st.session_state:
-    st.session_state.user_email = ""
-if "query" not in st.session_state:
-    st.session_state.query = ""
+if "user_id" not in st.session_state:
+    st.session_state.user_id = str(uuid.uuid4())
+
 if "history" not in st.session_state:
     st.session_state.history = []
 
+if "query" not in st.session_state:
+    st.session_state.query = ""
+
+user_id = st.session_state.user_id
+
 # ---------------- DATABASE ----------------
 conn = sqlite3.connect("demo.db", check_same_thread=False)
-cursor = conn.cursor()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS students (
-    id INTEGER PRIMARY KEY,
-    name TEXT,
-    age INTEGER
+# ---------------- SIDEBAR ----------------
+menu = st.sidebar.selectbox(
+    "Navigation",
+    ["SQL Editor", "History", "Profile"]
 )
-""")
 
-cursor.execute("INSERT OR IGNORE INTO students VALUES (1,'Tanvi',20)")
-cursor.execute("INSERT OR IGNORE INTO students VALUES (2,'Rahul',22)")
-conn.commit()
+# ============================
+# SQL EDITOR (OLD STYLE)
+# ============================
+if menu == "SQL Editor":
 
-# ---------------- LOGIN ----------------
-if not st.session_state.logged_in:
-    st.title("🔐 QueryPilot AI Login")
+    query = st.text_area("Enter SQL Query:", st.session_state.query)
+    st.session_state.query = query
 
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+    # 🔥 SIMPLE AUTOCOMPLETE
+    keywords = ["SELECT", "FROM", "WHERE", "JOIN", "GROUP BY", "ORDER BY", "INSERT", "UPDATE", "DELETE"]
 
-    if st.button("Login"):
-        if email == "tanvibarve21@gmail.com" and password == "Tanvi@721":
-            st.session_state.logged_in = True
-            st.session_state.user_email = email
-            st.success("✅ Login Successful")
-            st.rerun()
-        else:
-            st.error("Invalid Credentials")
+    if query:
+        last_word = query.split()[-1].upper()
+        suggestions = [k for k in keywords if k.startswith(last_word)]
 
-# ---------------- MAIN APP ----------------
-else:
-    col1, col2 = st.columns([8,2])
-    with col1:
-        st.markdown("## 🚀 QueryPilot AI")
-    with col2:
-        st.markdown(f"👤 {st.session_state.user_email}")
+        if suggestions:
+            st.write("💡 Suggestions:")
+            for s in suggestions:
+                if st.button(s):
+                    new_query = " ".join(query.split()[:-1]) + " " + s if len(query.split()) > 1 else s
+                    st.session_state.query = new_query
+                    st.rerun()
 
-    st.sidebar.title("⚙️ Menu")
-    page = st.sidebar.radio("", ["SQL Editor", "History", "Profile", "Logout"])
+    # 🔥 RUN QUERY
+    if st.button("Execute / Analyze"):
 
-    if page == "Logout":
-        st.session_state.logged_in = False
+        try:
+            df = pd.read_sql_query(query, conn)
+
+            st.success("✅ Query executed successfully")
+            st.dataframe(df)
+
+            st.session_state.history.append(query)
+
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
+
+    # 🔥 FILE UPLOAD
+    st.markdown("---")
+    file = st.file_uploader("Upload SQL file", type=["sql"])
+
+    if file:
+        content = file.read().decode("utf-8")
+        st.session_state.query = content
         st.rerun()
 
-    elif page == "Profile":
-        st.title("👤 Profile")
-        st.write("Email:", st.session_state.user_email)
 
-    elif page == "History":
-        st.title("🕘 Query History")
-        for q in st.session_state.history[::-1]:
-            st.code(q, language="sql")
+# ============================
+# HISTORY
+# ============================
+elif menu == "History":
 
-    elif page == "SQL Editor":
+    st.title("📊 Query History")
 
-        st.title("💻 SQL Editor (AI Assisted)")
+    for q in st.session_state.history[::-1]:
+        st.code(q, language="sql")
 
-        # -------- INPUT --------
-        query = st.text_area(
-            "Write your SQL query:",
-            st.session_state.query,
-            height=150,
-            key="query_box"
-        )
 
-        st.session_state.query = query
+# ============================
+# PROFILE (NEW FEATURE)
+# ============================
+elif menu == "Profile":
 
-        # -------- 🔥 REAL-TIME AUTOCOMPLETE --------
-        sql_keywords = [
-            "SELECT", "FROM", "WHERE", "JOIN",
-            "GROUP BY", "ORDER BY", "INSERT INTO",
-            "UPDATE", "DELETE", "CREATE TABLE"
-        ]
+    st.title("👤 Profile")
 
-        if query:
-            words = query.strip().split()
+    st.write("🆔 Your Session ID:")
+    st.code(user_id)
 
-            last_word = words[-1].upper() if words else ""
+    st.info("This ID is used to track your query history.")
 
-            suggestions = [kw for kw in sql_keywords if kw.startswith(last_word)]
-
-            if suggestions:
-                st.markdown("### 💡 Suggestions")
-
-                cols = st.columns(len(suggestions))
-
-                for i, s in enumerate(suggestions):
-                    with cols[i]:
-                        if st.button(s, key=f"sugg_{i}"):
-
-                            if len(words) > 1:
-                                new_query = " ".join(words[:-1]) + " " + s
-                            else:
-                                new_query = s
-
-                            st.session_state.query = new_query
-                            st.rerun()
-
-        # -------- RUN QUERY --------
-        if st.button("🚀 Run Query"):
-            try:
-                df = pd.read_sql_query(query, conn)
-
-                st.success("✅ Query Executed Successfully")
-                st.dataframe(df)
-
-                st.session_state.history.append(query)
-
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
-
-        # -------- FILE UPLOAD --------
-        st.markdown("---")
-        file = st.file_uploader("Upload SQL file", type=["sql"])
-
-        if file:
-            content = file.read().decode("utf-8")
-            st.session_state.query = content
-            st.rerun()
+    if st.button("🔄 Reset Session"):
+        st.session_state.user_id = str(uuid.uuid4())
+        st.success("New session created!")
