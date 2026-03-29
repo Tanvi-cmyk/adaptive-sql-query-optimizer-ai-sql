@@ -5,22 +5,37 @@ import streamlit as st
 
 def get_connection():
     try:
-        # Use Streamlit secrets for credentials
-        connection = mysql.connector.connect(
-            host=st.secrets.get("mysql", {}).get("host", "localhost"),
-            user=st.secrets.get("mysql", {}).get("user", "root"),
-            password=st.secrets.get("mysql", {}).get("password", ""),
-            database=st.secrets.get("mysql", {}).get("database", "sql_optimizer_db"),
-            port=st.secrets.get("mysql", {}).get("port", 3306),
-            autocommit=True
+        # ✅ Ensure secrets exist
+        if "mysql" not in st.secrets:
+            st.error("❌ MySQL secrets not found. Please configure secrets.toml")
+            return None
+
+        config = st.secrets["mysql"]
+
+        # ✅ Debug (remove later if needed)
+        st.write("🔍 Connecting to:", config["host"], ":", config["port"])
+
+        conn = mysql.connector.connect(
+            host=config["host"],
+            user=config["user"],
+            password=config["password"],
+            database=config["database"],
+            port=int(config["port"]),
+            autocommit=True,
+
+            # ✅ Railway compatibility
+            ssl_disabled=True,
+
+            # ✅ Stability
+            connection_timeout=10
         )
 
-        if connection.is_connected():
-            print("✅ MySQL Connected Successfully")
+        if conn.is_connected():
+            st.success("✅ Connected to Railway MySQL")
 
-            # Create required tables if not exist
-            cursor = connection.cursor()
+            cursor = conn.cursor()
 
+            # ✅ Create query_logs table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS query_logs (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -31,6 +46,7 @@ def get_connection():
             )
             """)
 
+            # ✅ Create optimization_results table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS optimization_results (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -44,8 +60,16 @@ def get_connection():
 
             cursor.close()
 
-        return connection
+        return conn
+
+    except KeyError as e:
+        st.error(f"❌ Missing key in secrets: {e}")
+        return None
 
     except Error as e:
-        print("❌ Connection Error:", e)
-        raise
+        st.error(f"❌ MySQL Error: {e}")
+        return None
+
+    except Exception as e:
+        st.error(f"❌ Unexpected Error: {e}")
+        return None
