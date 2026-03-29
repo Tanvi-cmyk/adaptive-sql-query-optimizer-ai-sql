@@ -1,194 +1,148 @@
 import streamlit as st
-import uuid
-import hashlib
+import sqlite3
+import pandas as pd
 
-from optimizer import (
-    predict_time,
-    suggest_basic_optimization,
-    recommend_index,
-    rewrite_query
+st.set_page_config(page_title="QueryPilot AI", layout="wide")
+
+# ---------------- CUSTOM CSS (PREMIUM UI) ----------------
+st.markdown("""
+<style>
+body {
+    background-color: #0e1117;
+}
+.stApp {
+    background: linear-gradient(135deg, #0e1117, #1c1f26);
+    color: white;
+}
+textarea {
+    background-color: #1c1f26 !important;
+    color: white !important;
+}
+div.stButton > button {
+    background-color: #4CAF50;
+    color: white;
+    border-radius: 8px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------- SESSION ----------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user_email" not in st.session_state:
+    st.session_state.user_email = ""
+if "query" not in st.session_state:
+    st.session_state.query = ""
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+# ---------------- DATABASE (DEMO) ----------------
+conn = sqlite3.connect("demo.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS students (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    age INTEGER
 )
-from explain_analyzer import get_explain_plan, analyze_plan
-from rl_agent import choose_action, update_q
-from db_connection import get_connection
+""")
 
+# sample data
+cursor.execute("INSERT OR IGNORE INTO students VALUES (1,'Tanvi',20)")
+cursor.execute("INSERT OR IGNORE INTO students VALUES (2,'Rahul',22)")
+conn.commit()
 
-# =============================================
-# 🔐 CONFIG
-# =============================================
-st.set_page_config(page_title="QueryPilot AI", page_icon="🚀", layout="wide")
+# ---------------- LOGIN ----------------
+if not st.session_state.logged_in:
+    st.title("🔐 QueryPilot AI Login")
 
-st.title("🚀 QueryPilot AI")
-st.caption("Optimize SQL queries using AI + Cloud Intelligence")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
 
-
-# =============================================
-# 🔐 AUTH SYSTEM
-# =============================================
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-
-auth_mode = st.sidebar.radio("Account", ["Login", "Signup", "Guest"])
-
-user = st.session_state.get("user", None)
-
-if auth_mode == "Signup":
-    st.sidebar.subheader("Create Account")
-    username = st.sidebar.text_input("Username")
-    email = st.sidebar.text_input("Email")
-    password = st.sidebar.text_input("Password", type="password")
-
-    if st.sidebar.button("Register"):
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            INSERT INTO users (username, email, password)
-            VALUES (%s, %s, %s)
-        """, (username, email, hash_password(password)))
-
-        conn.commit()
-        st.sidebar.success("✅ Account created! Login now")
-
-
-elif auth_mode == "Login":
-    st.sidebar.subheader("Login")
-    email = st.sidebar.text_input("Email")
-    password = st.sidebar.text_input("Password", type="password")
-
-    if st.sidebar.button("Login"):
-        conn = get_connection()
-        cursor = conn.cursor(dictionary=True)
-
-        cursor.execute("""
-            SELECT * FROM users 
-            WHERE email=%s AND password=%s
-        """, (email, hash_password(password)))
-
-        user = cursor.fetchone()
-
-        if user:
-            st.session_state.user = user
-            st.sidebar.success("✅ Logged in")
+    if st.button("Login"):
+        if email == "tanvibarve21@gmail.com" and password == "Tanvi@721":
+            st.session_state.logged_in = True
+            st.session_state.user_email = email
+            st.success("✅ Login Successful")
+            st.rerun()
         else:
-            st.sidebar.error("❌ Invalid credentials")
+            st.error("Invalid Credentials")
 
-
-# =============================================
-# USER IDENTIFICATION
-# =============================================
-if user:
-    user_id = user["id"]
+# ---------------- MAIN APP ----------------
 else:
-    if "guest_id" not in st.session_state:
-        st.session_state.guest_id = str(uuid.uuid4())
-    user_id = st.session_state.guest_id
+    # -------- TOP NAVBAR --------
+    col1, col2 = st.columns([8,2])
+    with col1:
+        st.markdown("## 🚀 QueryPilot AI")
+    with col2:
+        st.markdown(f"👤 {st.session_state.user_email}")
 
+    # -------- SIDEBAR --------
+    st.sidebar.title("⚙️ Menu")
+    page = st.sidebar.radio("", ["SQL Editor", "History", "Profile", "Logout"])
 
-# ---------------------------------
-# Navigation
-# ---------------------------------
-menu = st.sidebar.selectbox(
-    "Navigation",
-    ["SQL Optimizer", "Query History Dashboard"]
-)
+    # -------- LOGOUT --------
+    if page == "Logout":
+        st.session_state.logged_in = False
+        st.rerun()
 
+    # -------- PROFILE --------
+    elif page == "Profile":
+        st.title("👤 Profile")
+        st.write("Email:", st.session_state.user_email)
 
-# =============================================
-# SQL OPTIMIZER
-# =============================================
-if menu == "SQL Optimizer":
+    # -------- HISTORY --------
+    elif page == "History":
+        st.title("🕘 Query History")
+        for q in st.session_state.history[::-1]:
+            st.code(q, language="sql")
 
-    query = st.text_area("Enter SQL Query:")
+    # -------- SQL EDITOR --------
+    elif page == "SQL Editor":
+        st.title("💻 SQL Editor (AI Assisted)")
 
-    # 🔥 AUTO SUGGESTIONS
-    keywords = ["SELECT", "FROM", "WHERE", "JOIN", "GROUP BY", "ORDER BY", "INSERT", "UPDATE", "DELETE"]
-    suggestions = [k for k in keywords if query.upper() in k]
+        # Input
+        query = st.text_area("Write your SQL query:", st.session_state.query, height=150)
+        st.session_state.query = query
 
-    if suggestions:
-        st.write("💡 Suggestions:", suggestions)
-
-    # 📂 FILE UPLOAD
-    uploaded_file = st.file_uploader("Upload .sql file", type=["sql"])
-
-    if uploaded_file:
-        content = uploaded_file.read().decode("utf-8")
-        st.code(content)
-
-        queries = content.split(";")
-
-        for q in queries:
-            if q.strip():
-                st.write("🔍 Analyzing:", q)
-                st.write("⏱", predict_time(q))
-
-    if st.button("Execute / Analyze"):
+        # -------- AUTOCOMPLETE --------
+        sql_keywords = [
+            "SELECT", "FROM", "WHERE", "JOIN",
+            "GROUP BY", "ORDER BY", "INSERT INTO",
+            "UPDATE", "DELETE", "CREATE TABLE"
+        ]
 
         if query:
+            last_word = query.split()[-1].upper()
+            suggestions = [kw for kw in sql_keywords if kw.startswith(last_word)]
 
-            conn = get_connection()
-            if not conn:
-                st.stop()
-
-            cursor = conn.cursor(dictionary=True)
-
-            try:
-                cursor.execute(query)
-
-                if query.lower().startswith("select"):
-                    st.dataframe(cursor.fetchall())
-                else:
-                    conn.commit()
-                    st.success("✅ Query executed")
-
-                # AI
-                predicted_time = predict_time(query)
-                st.write(f"⏱ Predicted Time: {predicted_time}")
-
-                suggestions = suggest_basic_optimization(query)
+            if suggestions:
+                st.markdown("### 💡 Suggestions")
                 for s in suggestions:
-                    st.write("-", s)
+                    if st.button(s):
+                        st.session_state.query += " " + s
+                        st.rerun()
 
-                rewritten = rewrite_query(query)
-                st.code(rewritten, language="sql")
+        # -------- RUN QUERY --------
+        if st.button("🚀 Run Query"):
+            try:
+                df = pd.read_sql_query(query, conn)
 
-                # SAVE ONLY IF LOGGED IN
-                if user:
-                    cursor.execute("""
-                        INSERT INTO query_logs (query_text, predicted_time, user_id)
-                        VALUES (%s, %s, %s)
-                    """, (query, predicted_time, user_id))
+                st.success("✅ Query Executed Successfully")
+                st.dataframe(df)
 
-                    conn.commit()
+                # Save history
+                st.session_state.history.append(query)
 
             except Exception as e:
-                st.error(e)
+                st.error(f"❌ Error: {e}")
 
-            finally:
-                cursor.close()
-                conn.close()
+        # -------- FILE UPLOAD --------
+        st.markdown("---")
+        file = st.file_uploader("Upload SQL file", type=["sql"])
 
-
-# =============================================
-# DASHBOARD
-# =============================================
-elif menu == "Query History Dashboard":
-
-    if not user:
-        st.warning("⚠️ Login to view your history")
-        st.stop()
-
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    cursor.execute("""
-        SELECT * FROM query_logs 
-        WHERE user_id = %s
-        ORDER BY created_at DESC
-    """, (user_id,))
-
-    st.dataframe(cursor.fetchall())
-
-    cursor.close()
-    conn.close()
+        if file:
+            content = file.read().decode("utf-8")
+            st.session_state.query = content
+            st.rerun()
