@@ -1,4 +1,6 @@
 import streamlit as st
+import uuid
+
 from optimizer import (
     predict_time,
     suggest_basic_optimization,
@@ -8,6 +10,15 @@ from optimizer import (
 from explain_analyzer import get_explain_plan, analyze_plan
 from rl_agent import choose_action, update_q
 from db_connection import get_connection
+
+
+# =============================================
+# 🔐 UNIQUE USER SESSION (IMPORTANT)
+# =============================================
+if "user_id" not in st.session_state:
+    st.session_state.user_id = str(uuid.uuid4())
+
+user_id = st.session_state.user_id
 
 
 # ---------------------------------
@@ -34,7 +45,6 @@ if menu == "SQL Optimizer":
 
             conn = get_connection()
 
-            # ✅ FIX: STOP if connection fails
             if not conn:
                 st.error("❌ Database connection failed")
                 st.stop()
@@ -48,9 +58,7 @@ if menu == "SQL Optimizer":
             try:
                 query_clean = query.strip().lower()
 
-                # ---------------------------------
                 # Query Type Detection
-                # ---------------------------------
                 if query_clean.startswith("select"):
                     query_type = "SELECT"
                 elif query_clean.startswith("insert"):
@@ -70,16 +78,11 @@ if menu == "SQL Optimizer":
 
                 st.info(f"🔎 Detected Query Type: {query_type}")
 
-                # ---------------------------------
-                # Safety Check
-                # ---------------------------------
                 if "drop database" in query_clean:
                     st.error("❌ DROP DATABASE is not allowed.")
                     st.stop()
 
-                # ---------------------------------
                 # Execute Query
-                # ---------------------------------
                 cursor.execute(query)
 
                 if query_type == "SELECT":
@@ -102,9 +105,7 @@ if menu == "SQL Optimizer":
                     conn.commit()
                     st.success("✅ Query executed successfully")
 
-                # ---------------------------------
                 # AI Features
-                # ---------------------------------
                 predicted_time = predict_time(query)
                 st.write(f"⏱ Predicted Execution Time: {predicted_time} sec")
 
@@ -124,34 +125,33 @@ if menu == "SQL Optimizer":
                 st.subheader("🧠 Rewritten Optimized Query")
                 st.code(rewritten, language='sql')
 
-                # ---------------------------------
                 # RL Update
-                # ---------------------------------
                 state = str(query)
                 action_index = choose_action(state)
                 update_q(state, action_index, reward=1)
 
-                # ---------------------------------
-                # Store Logs
-                # ---------------------------------
+                # =============================================
+                # 💾 STORE USER-SPECIFIC DATA
+                # =============================================
                 cursor.execute("""
-                    INSERT INTO query_logs (query_text, predicted_time)
-                    VALUES (%s, %s)
-                """, (query, predicted_time))
+                    INSERT INTO query_logs (query_text, predicted_time, user_id)
+                    VALUES (%s, %s, %s)
+                """, (query, predicted_time, user_id))
 
                 cursor.execute("""
                     INSERT INTO optimization_results 
-                    (original_query, optimized_query, index_suggestions, issues_detected)
-                    VALUES (%s, %s, %s, %s)
+                    (original_query, optimized_query, index_suggestions, issues_detected, user_id)
+                    VALUES (%s, %s, %s, %s, %s)
                 """, (
                     query,
                     rewritten,
                     str(index_rec),
-                    str(issues)
+                    str(issues),
+                    user_id
                 ))
 
                 conn.commit()
-                st.success("📦 Stored in database!")
+                st.success("📦 Stored in your personal history!")
 
             except Exception as e:
                 st.error(f"❌ SQL Error: {e}")
@@ -166,11 +166,10 @@ if menu == "SQL Optimizer":
 # =============================================
 elif menu == "Query History Dashboard":
 
-    st.title("📊 Query History Dashboard")
+    st.title("📊 Your Query History")
 
     conn = get_connection()
 
-    # ✅ FIX HERE ALSO
     if not conn:
         st.error("❌ Database connection failed")
         st.stop()
@@ -178,14 +177,25 @@ elif menu == "Query History Dashboard":
     try:
         cursor = conn.cursor(dictionary=True)
 
-        cursor.execute("SELECT * FROM query_logs ORDER BY created_at DESC")
+        # ✅ ONLY USER DATA
+        cursor.execute("""
+            SELECT * FROM query_logs 
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+        """, (user_id,))
         logs = cursor.fetchall()
-        st.subheader("📝 Executed Queries")
+
+        st.subheader("📝 Your Queries")
         st.dataframe(logs)
 
-        cursor.execute("SELECT * FROM optimization_results ORDER BY created_at DESC")
+        cursor.execute("""
+            SELECT * FROM optimization_results 
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+        """, (user_id,))
         results = cursor.fetchall()
-        st.subheader("⚙ Optimization History")
+
+        st.subheader("⚙ Your Optimization History")
         st.dataframe(results)
 
     except Exception as e:

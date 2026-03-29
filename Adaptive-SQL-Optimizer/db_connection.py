@@ -12,9 +12,6 @@ def get_connection():
 
         config = st.secrets["mysql"]
 
-        # ✅ Debug (remove later if needed)
-        st.write(f"🔍 Connecting to: {config['host']} : {config['port']}")
-
         connection = mysql.connector.connect(
             host=config["host"],
             user=config["user"],
@@ -23,29 +20,29 @@ def get_connection():
             port=int(config["port"]),
             autocommit=True,
 
-            # 🔥 FINAL SSL FIX (Railway)
+            # ✅ Railway SSL fix
             ssl_disabled=False,
 
             connection_timeout=10
         )
 
         if connection.is_connected():
-            st.success("✅ Connected to Railway MySQL")
-
             cursor = connection.cursor()
 
-            # ✅ Table 1
+            # =====================================
+            # ✅ CREATE TABLES (WITH user_id)
+            # =====================================
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS query_logs (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 query_text TEXT,
                 predicted_time FLOAT,
                 actual_time FLOAT,
+                user_id VARCHAR(255),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """)
 
-            # ✅ Table 2
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS optimization_results (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -53,9 +50,23 @@ def get_connection():
                 optimized_query TEXT,
                 index_suggestions TEXT,
                 issues_detected TEXT,
+                user_id VARCHAR(255),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """)
+
+            # =====================================
+            # ✅ SAFE COLUMN ADD (if already old table)
+            # =====================================
+            try:
+                cursor.execute("ALTER TABLE query_logs ADD COLUMN user_id VARCHAR(255)")
+            except:
+                pass  # already exists
+
+            try:
+                cursor.execute("ALTER TABLE optimization_results ADD COLUMN user_id VARCHAR(255)")
+            except:
+                pass  # already exists
 
             cursor.close()
 
