@@ -12,6 +12,7 @@ def get_connection():
 
         config = st.secrets["mysql"]
 
+        # ✅ Connect to Railway MySQL
         connection = mysql.connector.connect(
             host=config["host"],
             user=config["user"],
@@ -19,7 +20,11 @@ def get_connection():
             database=config["database"],
             port=int(config["port"]),
             autocommit=True,
-            ssl_disabled=False,   # ✅ Railway SSL
+
+            # 🔥 Railway SSL Fix
+            ssl_disabled=False,
+
+            # 🔥 Stability
             connection_timeout=10
         )
 
@@ -27,7 +32,7 @@ def get_connection():
             cursor = connection.cursor()
 
             # =====================================
-            # 👤 USERS TABLE (NEW)
+            # 👤 USERS TABLE
             # =====================================
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -69,17 +74,25 @@ def get_connection():
             """)
 
             # =====================================
-            # 🛠 SAFE COLUMN ADD (BACKWARD COMPATIBLE)
+            # 🔍 SAFE COLUMN CHECK (Better than try/except)
             # =====================================
-            try:
+            cursor.execute("""
+                SELECT COLUMN_NAME 
+                FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_NAME = 'query_logs' 
+                AND COLUMN_NAME = 'user_id'
+            """)
+            if not cursor.fetchone():
                 cursor.execute("ALTER TABLE query_logs ADD COLUMN user_id VARCHAR(255)")
-            except:
-                pass
 
-            try:
+            cursor.execute("""
+                SELECT COLUMN_NAME 
+                FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_NAME = 'optimization_results' 
+                AND COLUMN_NAME = 'user_id'
+            """)
+            if not cursor.fetchone():
                 cursor.execute("ALTER TABLE optimization_results ADD COLUMN user_id VARCHAR(255)")
-            except:
-                pass
 
             cursor.close()
 
