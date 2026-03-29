@@ -32,21 +32,25 @@ if menu == "SQL Optimizer":
 
         if query:
 
-            conn = None
-            cursor = None
+            conn = get_connection()
+
+            # ✅ FIX: STOP if connection fails
+            if not conn:
+                st.error("❌ Database connection failed")
+                st.stop()
+
+            cursor = conn.cursor(dictionary=True)
+
             issues = []
             index_rec = []
             rewritten = ""
 
             try:
-                conn = get_connection()
-                cursor = conn.cursor(dictionary=True)
-
-                # ---------------------------------
-                # 🔍 Automatic Query Type Detection
-                # ---------------------------------
                 query_clean = query.strip().lower()
 
+                # ---------------------------------
+                # Query Type Detection
+                # ---------------------------------
                 if query_clean.startswith("select"):
                     query_type = "SELECT"
                 elif query_clean.startswith("insert"):
@@ -67,10 +71,10 @@ if menu == "SQL Optimizer":
                 st.info(f"🔎 Detected Query Type: {query_type}")
 
                 # ---------------------------------
-                # 🚨 Prevent Dangerous Commands
+                # Safety Check
                 # ---------------------------------
                 if "drop database" in query_clean:
-                    st.error("❌ DROP DATABASE is not allowed for safety reasons.")
+                    st.error("❌ DROP DATABASE is not allowed.")
                     st.stop()
 
                 # ---------------------------------
@@ -78,78 +82,57 @@ if menu == "SQL Optimizer":
                 # ---------------------------------
                 cursor.execute(query)
 
-                # SELECT
                 if query_type == "SELECT":
                     result = cursor.fetchall()
                     st.subheader("📋 Query Result")
                     st.dataframe(result)
 
-                    # EXPLAIN
                     explain_plan = get_explain_plan(query)
                     st.subheader("📊 MySQL EXPLAIN Plan")
                     st.dataframe(explain_plan)
 
                     issues = analyze_plan(explain_plan)
+
                     if issues:
                         st.subheader("⚠️ Issues Detected")
                         for issue in issues:
                             st.write("-", issue)
 
-                # INSERT / UPDATE / DELETE
-                elif query_type in ["INSERT", "UPDATE", "DELETE"]:
-                    conn.commit()
-                    st.success(f"✅ {cursor.rowcount} rows affected.")
-
-                # CREATE / ALTER / DROP
-                elif query_type in ["CREATE", "ALTER", "DROP"]:
-                    conn.commit()
-                    st.success("✅ Query executed successfully.")
-
                 else:
                     conn.commit()
-                    st.success("✅ Query executed.")
+                    st.success("✅ Query executed successfully")
 
                 # ---------------------------------
-                # AI Prediction
+                # AI Features
                 # ---------------------------------
                 predicted_time = predict_time(query)
                 st.write(f"⏱ Predicted Execution Time: {predicted_time} sec")
 
-                # ---------------------------------
-                # Basic Suggestions
-                # ---------------------------------
                 basic_suggestions = suggest_basic_optimization(query)
                 if basic_suggestions:
                     st.subheader("🔧 Optimization Suggestions")
                     for s in basic_suggestions:
                         st.write("-", s)
 
-                # ---------------------------------
-                # Index Recommendation
-                # ---------------------------------
                 index_rec = recommend_index(query)
                 if index_rec:
                     st.subheader("📌 Index Recommendations")
                     for rec in index_rec:
                         st.write("-", rec)
 
-                # ---------------------------------
-                # Query Rewrite
-                # ---------------------------------
                 rewritten = rewrite_query(query)
                 st.subheader("🧠 Rewritten Optimized Query")
                 st.code(rewritten, language='sql')
 
                 # ---------------------------------
-                # Reinforcement Learning Update
+                # RL Update
                 # ---------------------------------
                 state = str(query)
                 action_index = choose_action(state)
-                reward = 1
-                update_q(state, action_index, reward)
+                update_q(state, action_index, reward=1)
 
                 # ---------------------------------
-                # Store Logs in Database
+                # Store Logs
                 # ---------------------------------
                 cursor.execute("""
                     INSERT INTO query_logs (query_text, predicted_time)
@@ -168,49 +151,46 @@ if menu == "SQL Optimizer":
                 ))
 
                 conn.commit()
-                st.success("📦 Query & Optimization stored in database!")
+                st.success("📦 Stored in database!")
 
             except Exception as e:
                 st.error(f"❌ SQL Error: {e}")
 
             finally:
-                if cursor:
-                    cursor.close()
-                if conn:
-                    conn.close()
+                cursor.close()
+                conn.close()
 
 
 # =============================================
-# QUERY HISTORY DASHBOARD
+# DASHBOARD
 # =============================================
 elif menu == "Query History Dashboard":
 
     st.title("📊 Query History Dashboard")
 
+    conn = get_connection()
+
+    # ✅ FIX HERE ALSO
+    if not conn:
+        st.error("❌ Database connection failed")
+        st.stop()
+
     try:
-        conn = get_connection()
         cursor = conn.cursor(dictionary=True)
 
-        cursor.execute("""
-            SELECT * FROM query_logs
-            ORDER BY created_at DESC
-        """)
+        cursor.execute("SELECT * FROM query_logs ORDER BY created_at DESC")
         logs = cursor.fetchall()
-
         st.subheader("📝 Executed Queries")
         st.dataframe(logs)
 
-        cursor.execute("""
-            SELECT * FROM optimization_results
-            ORDER BY created_at DESC
-        """)
+        cursor.execute("SELECT * FROM optimization_results ORDER BY created_at DESC")
         results = cursor.fetchall()
-
         st.subheader("⚙ Optimization History")
         st.dataframe(results)
 
-        cursor.close()
-        conn.close()
-
     except Exception as e:
         st.error(f"Error loading dashboard: {e}")
+
+    finally:
+        cursor.close()
+        conn.close()

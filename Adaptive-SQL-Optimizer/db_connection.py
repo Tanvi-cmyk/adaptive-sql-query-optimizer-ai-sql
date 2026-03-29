@@ -7,30 +7,34 @@ def get_connection():
     try:
         # ✅ Ensure secrets exist
         if "mysql" not in st.secrets:
-            st.error("❌ MySQL secrets not found. Please configure secrets.toml")
+            st.error("❌ MySQL secrets not configured")
             return None
 
         config = st.secrets["mysql"]
 
-        # ✅ Debug (remove later)
-        st.write("🔍 Connecting to:", config["host"], ":", config["port"])
+        # ✅ Debug (remove later if needed)
+        st.write(f"🔍 Connecting to: {config['host']} : {config['port']}")
 
-        conn = mysql.connector.connect(
+        connection = mysql.connector.connect(
             host=config["host"],
             user=config["user"],
             password=config["password"],
             database=config["database"],
             port=int(config["port"]),
             autocommit=True,
-            ssl_disabled=True,
+
+            # 🔥 FINAL SSL FIX (Railway)
+            ssl_disabled=False,
+
             connection_timeout=10
         )
 
-        if conn.is_connected():
+        if connection.is_connected():
             st.success("✅ Connected to Railway MySQL")
 
-            cursor = conn.cursor()
+            cursor = connection.cursor()
 
+            # ✅ Table 1
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS query_logs (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -41,6 +45,7 @@ def get_connection():
             )
             """)
 
+            # ✅ Table 2
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS optimization_results (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -54,7 +59,7 @@ def get_connection():
 
             cursor.close()
 
-        return conn
+        return connection
 
     except KeyError as e:
         st.error(f"❌ Missing key in secrets: {e}")
@@ -66,4 +71,4 @@ def get_connection():
 
     except Exception as e:
         st.error(f"❌ Unexpected Error: {e}")
-        return None   # ✅ FIXED (you had typo here)
+        return None
